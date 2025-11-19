@@ -21,8 +21,11 @@ router.post('/login', userController.login);
 // Obter dados do dashboard
 router.get('/user/profile', auth, userController.getUserProfile);
 
+// Obter Histórico de Transações (ESTA É A ROTA QUE FALTAVA)
+router.get('/user/history', auth, userController.getHistory);
+
 // Financeiro
-router.post('/user/deposit', auth, upload.single('image'), userController.deposit); // 'image' é o nome do campo no form
+router.post('/user/deposit', auth, upload.single('image'), userController.deposit); 
 router.post('/user/withdraw', auth, userController.withdraw);
 
 // Ações na plataforma
@@ -32,10 +35,10 @@ router.post('/user/buy-plan', auth, userController.buyPlan);
 /* ==========================================
    ROTAS COMPARTILHADAS (Usuário e Admin)
 ========================================== */
-// Listar planos disponíveis (Usuário precisa ver para comprar)
+// Listar planos disponíveis
 router.get('/plans', auth, adminController.getAllPlans);
 
-// Ver contas de depósito (Usuário precisa ver para onde mandar dinheiro)
+// Ver configurações (contas de depósito)
 router.get('/config', auth, adminController.getSystemConfig);
 
 /* ==========================================
@@ -51,11 +54,11 @@ router.put('/admin/users/:id', auth, admin, adminController.updateUser);
 router.post('/admin/plans', auth, admin, upload.single('image'), adminController.createPlan);
 router.put('/admin/plans/:id', auth, admin, upload.single('image'), adminController.updatePlan);
 
-// Gerenciar Transações (Depósitos e Saques)
+// Gerenciar Transações
 router.get('/admin/transactions', auth, admin, adminController.getPendingTransactions);
-router.put('/admin/transactions/:id', auth, admin, adminController.handleTransaction); // Aprovar/Rejeitar
+router.put('/admin/transactions/:id', auth, admin, adminController.handleTransaction);
 
-// Configurações do Sistema (Contas Bancárias e Afiliados)
+// Configurações do Sistema
 router.put('/admin/config', auth, admin, adminController.updateSystemConfig);
 
 module.exports = router;
