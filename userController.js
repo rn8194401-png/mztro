@@ -1,9 +1,11 @@
+--- START OF FILE userController.js ---
+
 const { User, Plan, Transaction, SystemConfig } = require('./models');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// 1. Registro de Usuário (COM BÔNUS)
+// 1. Registro de Usuário (COM REGISTRO DE BÔNUS NO HISTÓRICO)
 exports.register = async (req, res) => {
     try {
         const { name, phone, password, referralId } = req.body;
@@ -21,11 +23,11 @@ exports.register = async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Verificar se existe Bônus de Boas-vindas configurado
+        // Verificar Bônus de Boas-vindas
         const config = await SystemConfig.findOne();
         const bonus = config ? (config.welcomeBonus || 0) : 0;
 
-        // Criar usuário (já com o saldo do bônus se houver)
+        // Criar usuário
         const newUser = new User({
             name,
             phone,
@@ -36,16 +38,15 @@ exports.register = async (req, res) => {
 
         await newUser.save();
 
-        // Se ganhou bônus, registra no histórico como "bonus"
+        // REGISTRA O BÔNUS NO HISTÓRICO (SE HOUVER)
         if (bonus > 0) {
-            const bonusTransaction = new Transaction({
+            await Transaction.create({
                 user: newUser._id,
                 type: 'bonus',
                 amount: bonus,
                 status: 'approved',
                 adminComment: 'Bônus de Boas-vindas'
             });
-            await bonusTransaction.save();
         }
         
         res.status(201).json({ msg: 'Conta criada com sucesso! Faça login.' });
@@ -85,7 +86,7 @@ exports.login = async (req, res) => {
     }
 };
 
-// 3. Obter Perfil e Dashboard (COM FRONTEND URL)
+// 3. Obter Perfil e Dashboard
 exports.getUserProfile = async (req, res) => {
     try {
         const user = await User.findById(req.user.id)
@@ -93,7 +94,6 @@ exports.getUserProfile = async (req, res) => {
             .populate('plan')
             .populate('referrer', 'name phone');
         
-        // Envia a URL do frontend para o link de convite
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5500';
 
         res.json({ user, frontendUrl });
@@ -102,25 +102,23 @@ exports.getUserProfile = async (req, res) => {
     }
 };
 
-// 4. Solicitar Depósito (COM NÚMERO DO REMETENTE)
+// 4. Solicitar Depósito
 exports.deposit = async (req, res) => {
     try {
         const { amount, senderPhone } = req.body;
         
-        // O arquivo vem do middleware multer (req.file)
         if (!req.file) return res.status(400).json({ msg: 'Comprovante é obrigatório.' });
         if (!senderPhone) return res.status(400).json({ msg: 'Informe o número que fez a transferência.' });
 
-        const newTransaction = new Transaction({
+        await Transaction.create({
             user: req.user.id,
             type: 'deposit',
             amount: Number(amount),
-            senderPhone: senderPhone, // Salva quem enviou
+            senderPhone: senderPhone,
             proofImage: req.file.path,
             status: 'pending'
         });
 
-        await newTransaction.save();
         res.json({ msg: 'Depósito enviado para análise.' });
 
     } catch (err) {
@@ -128,7 +126,7 @@ exports.deposit = async (req, res) => {
     }
 };
 
-// 5. Solicitar Saque (COM NOME E NÚMERO DE DESTINO)
+// 5. Solicitar Saque
 exports.withdraw = async (req, res) => {
     try {
         const { amount, destinationName, destinationPhone } = req.body;
@@ -136,27 +134,24 @@ exports.withdraw = async (req, res) => {
         
         if (!user.plan) return res.status(400).json({ msg: 'Você precisa de um plano VIP para sacar.' });
 
-        // Validações de limites do plano
         if (amount < user.plan.minWithdraw || amount > user.plan.maxWithdraw) {
             return res.status(400).json({ msg: `Saque permitido entre ${user.plan.minWithdraw} e ${user.plan.maxWithdraw} MT.` });
         }
 
         if (user.balance < amount) return res.status(400).json({ msg: 'Saldo insuficiente.' });
 
-        // Deduz saldo imediatamente
         user.balance -= Number(amount);
         await user.save();
 
-        const newTransaction = new Transaction({
+        await Transaction.create({
             user: req.user.id,
             type: 'withdrawal',
             amount: Number(amount),
-            destinationName: destinationName,   // Nome do titular
-            destinationPhone: destinationPhone, // Número da conta
+            destinationName: destinationName,
+            destinationPhone: destinationPhone,
             status: 'pending'
         });
 
-        await newTransaction.save();
         res.json({ msg: 'Solicitação de saque realizada.' });
 
     } catch (err) {
@@ -164,7 +159,7 @@ exports.withdraw = async (req, res) => {
     }
 };
 
-// 6. Tarefa Diária: Coletar Lucros
+// 6. Coletar Lucros (COM HISTÓRICO DETALHADO E FROM_USER)
 exports.collectDailyIncome = async (req, res) => {
     try {
         const user = await User.findById(req.user.id).populate('plan');
@@ -174,43 +169,60 @@ exports.collectDailyIncome = async (req, res) => {
         const now = new Date();
         const lastCollection = user.lastDailyCollection ? new Date(user.lastDailyCollection) : null;
 
-        // Verifica se já se passaram 24h (mesmo dia)
         const isSameDay = lastCollection && 
             now.getDate() === lastCollection.getDate() && 
             now.getMonth() === lastCollection.getMonth() && 
             now.getFullYear() === lastCollection.getFullYear();
 
-        if (isSameDay) {
-            return res.status(400).json({ msg: 'Você já coletou seu lucro hoje. Volte amanhã.' });
-        }
+        if (isSameDay) return res.status(400).json({ msg: 'Você já coletou seu lucro hoje.' });
 
-        // Adicionar lucro ao saldo
+        // 1. Adiciona saldo e atualiza data
         user.balance += user.plan.dailyIncome;
         user.lastDailyCollection = now;
+        await user.save();
+
+        // 2. CRIA HISTÓRICO: Lucro Diário
+        await Transaction.create({
+            user: user._id,
+            type: 'daily',
+            amount: user.plan.dailyIncome,
+            status: 'approved',
+            adminComment: `Rendimento diário (${user.plan.name})`
+        });
         
-        // Lógica de Afiliados (Recorrência)
+        // 3. Lógica de Recompensa Recorrente para o Líder (Opcional)
         if (user.referrer) {
             const config = await SystemConfig.findOne();
             const reward = config?.affiliateSettings?.recurringReward || 0;
+            
             if (reward > 0) {
                 const referrer = await User.findById(user.referrer);
                 if (referrer) {
                     referrer.balance += reward;
                     referrer.totalCommission += reward;
                     await referrer.save();
+
+                    // REGISTRO DE COMISSÃO RECORRENTE
+                    await Transaction.create({
+                        user: referrer._id,
+                        type: 'commission',
+                        amount: reward,
+                        status: 'approved',
+                        fromUser: user.phone, // Importante: Salva quem gerou o ganho
+                        adminComment: 'Bônus recorrente de equipe'
+                    });
                 }
             }
         }
 
-        await user.save();
-        res.json({ msg: `Lucro de ${user.plan.dailyIncome} MT coletado com sucesso!`, newBalance: user.balance });
+        res.json({ msg: `Lucro de ${user.plan.dailyIncome} MT coletado!`, newBalance: user.balance });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// 7. Comprar Plano
+// 7. Comprar Plano (COM HISTÓRICO DE COMISSÃO)
 exports.buyPlan = async (req, res) => {
     try {
         const { planId } = req.body;
@@ -220,12 +232,13 @@ exports.buyPlan = async (req, res) => {
         if (!plan) return res.status(404).json({ msg: 'Plano não encontrado.' });
         if (user.balance < plan.price) return res.status(400).json({ msg: 'Saldo insuficiente.' });
 
-        // Processar compra
+        // Compra
         user.balance -= plan.price;
         user.plan = plan._id;
         user.planStartDate = new Date();
+        await user.save();
         
-        // Comissão para o afiliado
+        // Comissão para o Líder
         if (user.referrer) {
             const config = await SystemConfig.findOne();
             const percent = config?.affiliateSettings?.commissionPercent || 0;
@@ -237,19 +250,28 @@ exports.buyPlan = async (req, res) => {
                     referrer.balance += commission;
                     referrer.totalCommission += commission;
                     await referrer.save();
+
+                    // REGISTRO DA COMISSÃO POR COMPRA
+                    await Transaction.create({
+                        user: referrer._id,
+                        type: 'commission',
+                        amount: commission,
+                        status: 'approved',
+                        fromUser: user.phone, // Quem comprou o plano
+                        adminComment: `Comissão de ${percent}% (Plano ${plan.name})`
+                    });
                 }
             }
         }
 
-        await user.save();
-        res.json({ msg: `Plano ${plan.name} ativado com sucesso!` });
+        res.json({ msg: `Plano ${plan.name} ativado!` });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// 8. Histórico
+// 8. Histórico do Usuário
 exports.getHistory = async (req, res) => {
     try {
         const transactions = await Transaction.find({ user: req.user.id }).sort({ createdAt: -1 });
@@ -259,14 +281,13 @@ exports.getHistory = async (req, res) => {
     }
 };
 
-// 9. CRIAÇÃO DE ADMIN MANUAL (TEMP)
+// 9. Criar Admin Manualmente (Use via rota /setup-admin)
 exports.createAdminManually = async (req, res) => {
     try {
-        const phone = '840000000'; // Defina seu número aqui
-        const password = 'admin123'; // Defina sua senha aqui
+        const phone = '840000000';
+        const password = 'admin123';
         
         let user = await User.findOne({ phone });
-        
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -275,7 +296,7 @@ exports.createAdminManually = async (req, res) => {
             user.role = 'admin';
             user.isActive = true;
             await user.save();
-            return res.json({ msg: 'Usuário existente atualizado para ADMIN com sucesso!' });
+            return res.json({ msg: 'Usuário atualizado para ADMIN!' });
         }
 
         const newAdmin = new User({
@@ -288,7 +309,7 @@ exports.createAdminManually = async (req, res) => {
         });
 
         await newAdmin.save();
-        res.json({ msg: 'Usuário ADMIN criado com sucesso no Banco de Dados!' });
+        res.json({ msg: 'ADMIN criado com sucesso!' });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
