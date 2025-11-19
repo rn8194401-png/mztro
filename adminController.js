@@ -1,53 +1,73 @@
+--- START OF FILE adminController.js ---
+
 const { User, Plan, Transaction, SystemConfig } = require('./models');
 const bcrypt = require('bcryptjs');
-const fs = require('fs');
 
 // --- 1. GERENCIAMENTO DE USUÁRIOS ---
 
-// Listar todos os usuários
+// Listar todos os usuários (Resumo para a tabela)
 exports.getAllUsers = async (req, res) => {
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        const users = await User.find()
+            .select('-password') // Não mandar a senha
+            .populate('plan', 'name') // Trazer o nome do plano
+            .sort({ createdAt: -1 });
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// Ver detalhes completos de um usuário (histórico e indicados)
+// Ver detalhes COMPLETOS de um usuário
+// (Usado na nova página admin-user-details.html)
 exports.getUserDetails = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).populate('plan').populate('referrer', 'name phone');
+        const { id } = req.params;
+
+        // 1. Dados do Usuário (com plano e quem indicou ele)
+        const user = await User.findById(id)
+            .select('-password')
+            .populate('plan')
+            .populate('referrer', 'name phone'); // Traz nome e telefone do líder
+
         if (!user) return res.status(404).json({ msg: 'Usuário não encontrado' });
 
-        const transactions = await Transaction.find({ user: user._id }).sort({ createdAt: -1 });
-        const referrals = await User.find({ referrer: user._id }).select('name phone plan createdAt');
+        // 2. Histórico Completo (Depósitos, Saques, Lucros, Comissões)
+        const transactions = await Transaction.find({ user: id })
+            .sort({ createdAt: -1 });
+
+        // 3. Lista de Indicados (Quem esse usuário convidou)
+        const referrals = await User.find({ referrer: id })
+            .select('name phone createdAt balance');
 
         res.json({ user, transactions, referrals });
+
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// Atualizar usuário (Bloquear, Mudar Senha, Saldo, Plano, Telefone)
+// Atualizar usuário (Bloquear, Saldo, Senha, etc.)
 exports.updateUser = async (req, res) => {
     try {
         const { id } = req.params;
-        const { balance, password, phone, isActive, planId } = req.body;
+        const { balance, password, isActive, planId } = req.body;
 
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ msg: 'Usuário não encontrado' });
 
+        // Atualizações manuais
         if (balance !== undefined) user.balance = Number(balance);
-        if (phone) user.phone = phone;
         if (isActive !== undefined) user.isActive = isActive;
         
+        // Admin pode forçar a mudança de plano
         if (planId) {
             user.plan = planId;
             user.planStartDate = new Date();
         }
 
-        if (password) {
+        // Admin pode resetar senha do usuário
+        if (password && password.trim() !== '') {
             const salt = await bcrypt.genSalt(10);
             user.password = await bcrypt.hash(password, salt);
         }
@@ -66,7 +86,6 @@ exports.updateUser = async (req, res) => {
 exports.createPlan = async (req, res) => {
     try {
         const { name, price, dailyIncome, minDeposit, minWithdraw, maxWithdraw } = req.body;
-        
         const imageUrl = req.file ? req.file.path : '';
 
         const newPlan = new Plan({
@@ -103,7 +122,7 @@ exports.updatePlan = async (req, res) => {
     }
 };
 
-// Listar Planos (Para o Admin ver e editar)
+// Listar Planos
 exports.getAllPlans = async (req, res) => {
     try {
         const plans = await Plan.find();
@@ -113,18 +132,18 @@ exports.getAllPlans = async (req, res) => {
     }
 };
 
-// --- 3. GERENCIAMENTO DE TRANSAÇÕES (DEPÓSITOS E SAQUES) ---
+// --- 3. GERENCIAMENTO DE TRANSAÇÕES ---
 
-// Pegar transações pendentes (filtro opcional por tipo)
+// Transações Pendentes (Depósitos e Saques para aprovação)
 exports.getPendingTransactions = async (req, res) => {
     try {
-        const { type } = req.query; // ?type=deposit ou ?type=withdrawal
+        const { type } = req.query;
         const filter = { status: 'pending' };
         if (type) filter.type = type;
 
         const transactions = await Transaction.find(filter)
             .populate('user', 'name phone balance')
-            .sort({ createdAt: 1 }); // Mais antigos primeiro
+            .sort({ createdAt: 1 });
 
         res.json(transactions);
     } catch (err) {
@@ -132,43 +151,36 @@ exports.getPendingTransactions = async (req, res) => {
     }
 };
 
-// Aprovar ou Rejeitar Transação
+// Aprovar ou Rejeitar
 exports.handleTransaction = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, adminComment } = req.body; // status: 'approved' ou 'rejected'
+        const { status, adminComment } = req.body; 
 
         const transaction = await Transaction.findById(id).populate('user');
         if (!transaction) return res.status(404).json({ msg: 'Transação não encontrada' });
         
         if (transaction.status !== 'pending') {
-            return res.status(400).json({ msg: 'Transação já foi processada anteriormente.' });
+            return res.status(400).json({ msg: 'Transação já processada.' });
         }
 
         transaction.status = status;
         transaction.adminComment = adminComment || '';
 
-        // Lógica para Depósito
-        if (transaction.type === 'deposit') {
-            if (status === 'approved') {
-                // Adiciona saldo ao usuário
-                transaction.user.balance += transaction.amount;
-                await transaction.user.save();
-            }
+        // Depósito Aprovado = +Saldo
+        if (transaction.type === 'deposit' && status === 'approved') {
+            transaction.user.balance += transaction.amount;
+            await transaction.user.save();
         } 
-        // Lógica para Saque (Levantamento)
-        else if (transaction.type === 'withdrawal') {
-            if (status === 'rejected') {
-                // Se for rejeitado, devolve o dinheiro ao saldo do usuário
-                // (Pois foi descontado no momento da solicitação)
-                transaction.user.balance += transaction.amount;
-                await transaction.user.save();
-            }
-            // Se for aprovado, o saldo já saiu da conta, então não faz nada no DB além de mudar status
+        // Saque Rejeitado = +Saldo (Devolução)
+        else if (transaction.type === 'withdrawal' && status === 'rejected') {
+            transaction.user.balance += transaction.amount;
+            await transaction.user.save();
         }
+        // Saque Aprovado = Nada muda no saldo (já foi descontado na solicitação)
 
         await transaction.save();
-        res.json({ msg: `Transação ${status === 'approved' ? 'aprovada' : 'rejeitada'} com sucesso.` });
+        res.json({ msg: 'Transação processada com sucesso.' });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -177,7 +189,6 @@ exports.handleTransaction = async (req, res) => {
 
 // --- 4. CONFIGURAÇÕES DO SISTEMA ---
 
-// Obter configurações atuais (Bônus, Contas, Afiliados)
 exports.getSystemConfig = async (req, res) => {
     try {
         let config = await SystemConfig.findOne();
@@ -191,7 +202,6 @@ exports.getSystemConfig = async (req, res) => {
     }
 };
 
-// Atualizar configurações (Admin define bônus, contas de depósito e % afiliados)
 exports.updateSystemConfig = async (req, res) => {
     try {
         const { depositAccounts, affiliateSettings, welcomeBonus } = req.body;
@@ -199,17 +209,12 @@ exports.updateSystemConfig = async (req, res) => {
         let config = await SystemConfig.findOne();
         if (!config) config = new SystemConfig();
 
-        // Atualiza Contas de Depósito (Admin adiciona/remove)
         if (depositAccounts) config.depositAccounts = depositAccounts;
-        
-        // Atualiza Configurações de Afiliados
         if (affiliateSettings) config.affiliateSettings = affiliateSettings;
-
-        // Atualiza Bônus de Boas-Vindas (Pode ser 0 para desativar)
         if (welcomeBonus !== undefined) config.welcomeBonus = Number(welcomeBonus);
 
         await config.save();
-        res.json({ msg: 'Configurações do sistema atualizadas com sucesso!', config });
+        res.json({ msg: 'Configurações atualizadas!', config });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
