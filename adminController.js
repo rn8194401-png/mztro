@@ -1,5 +1,3 @@
---- START OF FILE adminController.js ---
-
 const { User, Plan, Transaction, SystemConfig } = require('./models');
 const bcrypt = require('bcryptjs');
 

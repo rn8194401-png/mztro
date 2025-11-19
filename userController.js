@@ -1,5 +1,3 @@
---- START OF FILE userController.js ---
-
 const { User, Plan, Transaction, SystemConfig } = require('./models');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
