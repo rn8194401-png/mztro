@@ -86,6 +86,7 @@ exports.getUserProfile = async (req, res) => {
 exports.deposit = async (req, res) => {
     try {
         const { amount } = req.body;
+        
         // O arquivo vem do middleware multer (req.file)
         if (!req.file) return res.status(400).json({ msg: 'Comprovante é obrigatório.' });
 
@@ -115,7 +116,7 @@ exports.withdraw = async (req, res) => {
 
         // Validações de limites do plano
         if (amount < user.plan.minWithdraw || amount > user.plan.maxWithdraw) {
-            return res.status(400).json({ msg: `Saque permitido entre ${user.plan.minWithdraw} e ${user.plan.maxWithdraw}.` });
+            return res.status(400).json({ msg: `Saque permitido entre ${user.plan.minWithdraw} e ${user.plan.maxWithdraw} MT.` });
         }
 
         if (user.balance < amount) return res.status(400).json({ msg: 'Saldo insuficiente.' });
@@ -149,8 +150,7 @@ exports.collectDailyIncome = async (req, res) => {
         const now = new Date();
         const lastCollection = user.lastDailyCollection ? new Date(user.lastDailyCollection) : null;
 
-        // Verifica se já se passaram 24h (ou se é um novo dia, dependendo da regra. Aqui uso 24h simples)
-        // Para simplificar teste, vou colocar verificação de dia diferente
+        // Verifica se é o mesmo dia
         const isSameDay = lastCollection && 
             now.getDate() === lastCollection.getDate() && 
             now.getMonth() === lastCollection.getMonth() && 
@@ -179,7 +179,7 @@ exports.collectDailyIncome = async (req, res) => {
         }
 
         await user.save();
-        res.json({ msg: `Lucro de ${user.plan.dailyIncome} coletado com sucesso!`, newBalance: user.balance });
+        res.json({ msg: `Lucro de ${user.plan.dailyIncome} MT coletado com sucesso!`, newBalance: user.balance });
 
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -220,6 +220,17 @@ exports.buyPlan = async (req, res) => {
         await user.save();
         res.json({ msg: `Plano ${plan.name} ativado com sucesso!` });
 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// 8. Obter Histórico de Transações (NOVO)
+exports.getHistory = async (req, res) => {
+    try {
+        // Busca transações onde o usuário é o dono, ordenando do mais novo para o mais velho
+        const transactions = await Transaction.find({ user: req.user.id }).sort({ createdAt: -1 });
+        res.json(transactions);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
