@@ -1,68 +1,63 @@
 const mongoose = require('mongoose');
 
-// 1. Schema de Usuário
+// 1. User Schema
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    phone: { 
-        type: String, 
-        required: true, 
-        unique: true, 
-        minlength: 9, 
-        maxlength: 9 
-    },
+    phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     balance: { type: Number, default: 0 },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     isActive: { type: Boolean, default: true },
-    
-    // Plano Atual
     plan: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan', default: null },
     planStartDate: { type: Date },
-    lastDailyCollection: { type: Date, default: null }, // Controle da tarefa diária
-    
-    // Sistema de Afiliados
+    lastDailyCollection: { type: Date, default: null },
     referrer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     totalCommission: { type: Number, default: 0 },
-    
 }, { timestamps: true });
 
-// 2. Schema de Planos de Investimento
+// 2. Plan Schema
 const planSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    price: { type: Number, required: true }, // Valor do plano
-    dailyIncome: { type: Number, required: true }, // Renda diária
-    imageUrl: { type: String }, // URL do Cloudinary
+    price: { type: Number, required: true },
+    dailyIncome: { type: Number, required: true },
+    imageUrl: { type: String },
     minDeposit: { type: Number, default: 0 },
     minWithdraw: { type: Number, required: true },
     maxWithdraw: { type: Number, required: true },
     isActive: { type: Boolean, default: true }
 });
 
-// 3. Schema de Transações (Depósitos e Saques)
+// 3. Transaction Schema (ATUALIZADO)
 const transactionSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['deposit', 'withdrawal'], required: true },
+    type: { type: String, enum: ['deposit', 'withdrawal', 'bonus'], required: true }, // Adicionado 'bonus'
     amount: { type: Number, required: true },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
-    proofImage: { type: String }, // URL do comprovante (apenas para depósitos)
-    adminComment: { type: String }, // Motivo de rejeição, se houver
+    
+    // Campos Novos
+    proofImage: { type: String }, // Apenas depósito
+    senderPhone: { type: String }, // Apenas depósito (quem enviou)
+    
+    destinationPhone: { type: String }, // Apenas saque
+    destinationName: { type: String }, // Apenas saque
+    
+    adminComment: { type: String },
 }, { timestamps: true });
 
-// 4. Schema de Configurações do Sistema (Admin)
-// Armazena contas bancárias para depósito e % de afiliados
+// 4. System Config Schema (ATUALIZADO)
 const configSchema = new mongoose.Schema({
+    welcomeBonus: { type: Number, default: 100 }, // Novo Bônus
     depositAccounts: [{
-        network: String, // Ex: M-Pesa, e-Mola
+        network: String,
         number: String,
         ownerName: String
     }],
     affiliateSettings: {
-        commissionPercent: { type: Number, default: 10 }, // % sobre investimento
-        recurringReward: { type: Number, default: 0 } // Valor fixo diário por indicado ativo
+        commissionPercent: { type: Number, default: 10 },
+        recurringReward: { type: Number, default: 0 }
     }
 });
 
-// Exportar Modelos
 const User = mongoose.model('User', userSchema);
 const Plan = mongoose.model('Plan', planSchema);
 const Transaction = mongoose.model('Transaction', transactionSchema);

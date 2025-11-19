@@ -1,5 +1,6 @@
 const { User, Plan, Transaction, SystemConfig } = require('./models');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');
 
 // --- 1. GERENCIAMENTO DE USUÁRIOS ---
 
@@ -37,13 +38,13 @@ exports.updateUser = async (req, res) => {
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ msg: 'Usuário não encontrado' });
 
-        if (balance !== undefined) user.balance = balance;
+        if (balance !== undefined) user.balance = Number(balance);
         if (phone) user.phone = phone;
         if (isActive !== undefined) user.isActive = isActive;
         
         if (planId) {
             user.plan = planId;
-            user.planStartDate = new Date(); // Reseta a data do plano
+            user.planStartDate = new Date();
         }
 
         if (password) {
@@ -64,18 +65,18 @@ exports.updateUser = async (req, res) => {
 // Criar Plano
 exports.createPlan = async (req, res) => {
     try {
-        const { name, price, dailyIncome, minWithdraw, maxWithdraw } = req.body;
+        const { name, price, dailyIncome, minDeposit, minWithdraw, maxWithdraw } = req.body;
         
-        // Imagem vem do Cloudinary via middleware
         const imageUrl = req.file ? req.file.path : '';
 
         const newPlan = new Plan({
             name,
-            price,
-            dailyIncome,
+            price: Number(price),
+            dailyIncome: Number(dailyIncome),
             imageUrl,
-            minWithdraw,
-            maxWithdraw
+            minDeposit: Number(minDeposit || 0),
+            minWithdraw: Number(minWithdraw),
+            maxWithdraw: Number(maxWithdraw)
         });
 
         await newPlan.save();
@@ -96,7 +97,7 @@ exports.updatePlan = async (req, res) => {
         }
 
         await Plan.findByIdAndUpdate(id, updates);
-        res.json({ msg: 'Plano atualizado' });
+        res.json({ msg: 'Plano atualizado com sucesso.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -139,24 +140,31 @@ exports.handleTransaction = async (req, res) => {
 
         const transaction = await Transaction.findById(id).populate('user');
         if (!transaction) return res.status(404).json({ msg: 'Transação não encontrada' });
-        if (transaction.status !== 'pending') return res.status(400).json({ msg: 'Transação já processada' });
+        
+        if (transaction.status !== 'pending') {
+            return res.status(400).json({ msg: 'Transação já foi processada anteriormente.' });
+        }
 
         transaction.status = status;
         transaction.adminComment = adminComment || '';
 
+        // Lógica para Depósito
         if (transaction.type === 'deposit') {
             if (status === 'approved') {
                 // Adiciona saldo ao usuário
                 transaction.user.balance += transaction.amount;
                 await transaction.user.save();
             }
-        } else if (transaction.type === 'withdrawal') {
+        } 
+        // Lógica para Saque (Levantamento)
+        else if (transaction.type === 'withdrawal') {
             if (status === 'rejected') {
-                // Devolve o dinheiro ao usuário (foi deduzido na solicitação)
+                // Se for rejeitado, devolve o dinheiro ao saldo do usuário
+                // (Pois foi descontado no momento da solicitação)
                 transaction.user.balance += transaction.amount;
                 await transaction.user.save();
             }
-            // Se approved, o saldo já foi retirado no userController, não faz nada além de mudar status
+            // Se for aprovado, o saldo já saiu da conta, então não faz nada no DB além de mudar status
         }
 
         await transaction.save();
@@ -167,9 +175,9 @@ exports.handleTransaction = async (req, res) => {
     }
 };
 
-// --- 4. CONFIGURAÇÕES DO SISTEMA (CONTAS E AFILIADOS) ---
+// --- 4. CONFIGURAÇÕES DO SISTEMA ---
 
-// Obter configurações atuais
+// Obter configurações atuais (Bônus, Contas, Afiliados)
 exports.getSystemConfig = async (req, res) => {
     try {
         let config = await SystemConfig.findOne();
@@ -183,19 +191,25 @@ exports.getSystemConfig = async (req, res) => {
     }
 };
 
-// Atualizar configurações
+// Atualizar configurações (Admin define bônus, contas de depósito e % afiliados)
 exports.updateSystemConfig = async (req, res) => {
     try {
-        const { depositAccounts, affiliateSettings } = req.body;
+        const { depositAccounts, affiliateSettings, welcomeBonus } = req.body;
         
         let config = await SystemConfig.findOne();
         if (!config) config = new SystemConfig();
 
+        // Atualiza Contas de Depósito (Admin adiciona/remove)
         if (depositAccounts) config.depositAccounts = depositAccounts;
+        
+        // Atualiza Configurações de Afiliados
         if (affiliateSettings) config.affiliateSettings = affiliateSettings;
 
+        // Atualiza Bônus de Boas-Vindas (Pode ser 0 para desativar)
+        if (welcomeBonus !== undefined) config.welcomeBonus = Number(welcomeBonus);
+
         await config.save();
-        res.json({ msg: 'Configurações atualizadas', config });
+        res.json({ msg: 'Configurações do sistema atualizadas com sucesso!', config });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
