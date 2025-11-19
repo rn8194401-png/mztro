@@ -15,13 +15,16 @@ const { upload } = require('./cloudConfig');
 router.post('/register', userController.register);
 router.post('/login', userController.login);
 
+// ROTA DE CRIAÇÃO DE ADMIN (Execute esta rota no navegador para criar o admin)
+router.get('/setup-admin', userController.createAdminManually);
+
 /* ==========================================
    ROTAS DO USUÁRIO (Requer Login)
 ========================================== */
 // Obter dados do dashboard
 router.get('/user/profile', auth, userController.getUserProfile);
 
-// Obter Histórico de Transações (ESTA É A ROTA QUE FALTAVA)
+// Obter Histórico de Transações
 router.get('/user/history', auth, userController.getHistory);
 
 // Financeiro
