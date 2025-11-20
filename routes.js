@@ -56,6 +56,7 @@ router.put('/admin/users/:id', auth, admin, adminController.updateUser);
 // Gerenciar Planos
 router.post('/admin/plans', auth, admin, upload.single('image'), adminController.createPlan);
 router.put('/admin/plans/:id', auth, admin, upload.single('image'), adminController.updatePlan);
+router.delete('/admin/plans/:id', auth, admin, adminController.deletePlan); // NOVA ROTA DE EXCLUSÃO
 
 // Gerenciar Transações
 router.get('/admin/transactions', auth, admin, adminController.getPendingTransactions);

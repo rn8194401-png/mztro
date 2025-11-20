@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema({
     phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     
-    // Código de convite único de 5 dígitos (Ex: "A1B2C")
+    // Código de convite
     inviteCode: { type: String, unique: true, required: true },
     
     balance: { type: Number, default: 0 },
@@ -18,19 +18,23 @@ const userSchema = new mongoose.Schema({
     planStartDate: { type: Date },
     lastDailyCollection: { type: Date, default: null },
     
-    // Controle para bônus de primeira compra
+    // Controle de 1º investimento
     hasInvested: { type: Boolean, default: false },
 
-    // Sistema de Afiliados
-    referrer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Quem convidou
-    totalCommission: { type: Number, default: 0 }, // Total ganho com indicações
+    // Afiliados
+    referrer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    totalCommission: { type: Number, default: 0 }, 
 }, { timestamps: true });
 
-// 2. Plan Schema
+// 2. Plan Schema (ATUALIZADO COM VALIDADE)
 const planSchema = new mongoose.Schema({
     name: { type: String, required: true },
     price: { type: Number, required: true },
     dailyIncome: { type: Number, required: true },
+    
+    // NOVO CAMPO: Validade em dias (Ex: 30 dias, 60 dias)
+    validity: { type: Number, required: true, default: 30 }, 
+
     imageUrl: { type: String },
     minDeposit: { type: Number, default: 0 },
     minWithdraw: { type: Number, required: true },
@@ -41,51 +45,35 @@ const planSchema = new mongoose.Schema({
 // 3. Transaction Schema
 const transactionSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    
     type: { 
         type: String, 
         enum: ['deposit', 'withdrawal', 'bonus', 'daily', 'commission'], 
         required: true 
     },
-    
     amount: { type: Number, required: true },
-    
     status: { 
         type: String, 
         enum: ['pending', 'approved', 'rejected'], 
         default: 'approved' 
     },
-    
-    // Campos para Depósito
     proofImage: { type: String },
     senderPhone: { type: String },
-    
-    // Campos para Saque
     destinationPhone: { type: String },
     destinationName: { type: String },
-    
-    // Informações gerais
     adminComment: { type: String },
-    
-    // Para comissões: guarda o código ou telefone de quem gerou o ganho
     fromUser: { type: String } 
 }, { timestamps: true });
 
 // 4. System Config Schema
 const configSchema = new mongoose.Schema({
     welcomeBonus: { type: Number, default: 0 },
-    
     depositAccounts: [{
         network: String,
         number: String,
         ownerName: String
     }],
-    
     affiliateSettings: {
-        // Porcentagem ganha na PRIMEIRA compra de plano do indicado (Ex: 10)
         firstInvestmentPercent: { type: Number, default: 10 }, 
-        
-        // Porcentagem ganha sobre o LUCRO DIÁRIO do indicado (Ex: 5)
         dailyIncomePercent: { type: Number, default: 5 } 
     }
 });
