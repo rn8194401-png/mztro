@@ -5,18 +5,25 @@ const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     phone: { type: String, required: true, unique: true },
     password: { type: String, required: true },
+    
+    // Código de convite único de 5 dígitos (Ex: "A1B2C")
+    inviteCode: { type: String, unique: true, required: true },
+    
     balance: { type: Number, default: 0 },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     isActive: { type: Boolean, default: true },
     
-    // Campos de Plano e Ganhos
+    // Dados do Plano
     plan: { type: mongoose.Schema.Types.ObjectId, ref: 'Plan', default: null },
     planStartDate: { type: Date },
     lastDailyCollection: { type: Date, default: null },
     
-    // Campos de Indicação (Afiliados)
-    referrer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    totalCommission: { type: Number, default: 0 }, // Acumulado de ganhos por indicação
+    // Controle para bônus de primeira compra
+    hasInvested: { type: Boolean, default: false },
+
+    // Sistema de Afiliados
+    referrer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // Quem convidou
+    totalCommission: { type: Number, default: 0 }, // Total ganho com indicações
 }, { timestamps: true });
 
 // 2. Plan Schema
@@ -31,11 +38,10 @@ const planSchema = new mongoose.Schema({
     isActive: { type: Boolean, default: true }
 });
 
-// 3. Transaction Schema (ATUALIZADO PARA HISTÓRICO COMPLETO)
+// 3. Transaction Schema
 const transactionSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     
-    // Adicionado 'daily' (lucro diário) e 'commission' (ganho por indicação)
     type: { 
         type: String, 
         enum: ['deposit', 'withdrawal', 'bonus', 'daily', 'commission'], 
@@ -44,40 +50,43 @@ const transactionSchema = new mongoose.Schema({
     
     amount: { type: Number, required: true },
     
-    // Status padrão 'approved' para lucros automáticos, 'pending' para depósitos/saques
     status: { 
         type: String, 
         enum: ['pending', 'approved', 'rejected'], 
         default: 'approved' 
     },
     
-    // Campos específicos de Depósito
-    proofImage: { type: String }, // URL da imagem
-    senderPhone: { type: String }, // Quem enviou o dinheiro
+    // Campos para Depósito
+    proofImage: { type: String },
+    senderPhone: { type: String },
     
-    // Campos específicos de Saque (Levantamento)
-    destinationPhone: { type: String }, 
-    destinationName: { type: String }, 
+    // Campos para Saque
+    destinationPhone: { type: String },
+    destinationName: { type: String },
     
-    // Detalhes administrativos ou do sistema
+    // Informações gerais
     adminComment: { type: String },
     
-    // NOVO: Armazena o telefone/nome de quem gerou a comissão (Ex: "841234567")
+    // Para comissões: guarda o código ou telefone de quem gerou o ganho
     fromUser: { type: String } 
-
 }, { timestamps: true });
 
 // 4. System Config Schema
 const configSchema = new mongoose.Schema({
-    welcomeBonus: { type: Number, default: 0 }, // Bônus ao registrar
+    welcomeBonus: { type: Number, default: 0 },
+    
     depositAccounts: [{
-        network: String, // Ex: M-Pesa, e-Mola
+        network: String,
         number: String,
         ownerName: String
     }],
+    
     affiliateSettings: {
-        commissionPercent: { type: Number, default: 10 }, // % na compra do plano
-        recurringReward: { type: Number, default: 0 } // Valor fixo quando indicado coleta lucro (opcional)
+        // Porcentagem ganha na PRIMEIRA compra de plano do indicado (Ex: 10)
+        firstInvestmentPercent: { type: Number, default: 10 }, 
+        
+        // Porcentagem ganha sobre o LUCRO DIÁRIO do indicado (Ex: 5)
+        dailyIncomePercent: { type: Number, default: 5 } 
     }
 });
 
